@@ -1,0 +1,187 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-wa-green: #00a884;
+  --color-wa-green-dark: #008069;
+  --color-wa-teal: #075e54;
+  --color-wa-teal-dark: #054640;
+  --color-wa-light-green: #d9fdd3;
+  --color-wa-chat-bg: #efeae2;
+  --color-wa-header: #f0f2f5;
+  --color-wa-input-bg: #f0f2f5;
+  --color-wa-bubble-out: #d9fdd3;
+  --color-wa-bubble-in: #ffffff;
+  --color-wa-text: #111b21;
+  --color-wa-text-secondary: #667781;
+  --color-wa-time: #667781;
+  --color-wa-border: #e9edef;
+  --color-wa-panel-bg: #ffffff;
+  --font-sans: 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+
+:root {
+  --background: #efeae2;
+  --foreground: #111b21;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Scrollbar WhatsApp style */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.35);
+}
+
+/* WhatsApp wallpaper pattern */
+.wa-wallpaper {
+  background-color: #efeae2;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c7bfb5' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Typing animation */
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+
+.typing-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #8696a0;
+  animation: typingBounce 1.4s infinite ease-in-out;
+}
+.typing-dot:nth-child(1) { animation-delay: 0s; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Message slide in */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.msg-in {
+  animation: slideInLeft 0.2s ease-out;
+}
+.msg-out {
+  animation: slideInRight 0.2s ease-out;
+}
+
+/* Bubble tail for outgoing (right) */
+.bubble-out::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid #d9fdd3;
+  border-top: 8px solid transparent;
+  border-bottom: 0 solid transparent;
+}
+/* Bubble tail for incoming (left) */
+.bubble-in::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -8px;
+  width: 0;
+  height: 0;
+  border-right: 8px solid #ffffff;
+  border-top: 8px solid transparent;
+  border-bottom: 0 solid transparent;
+}
+
+/* Fade in overlay */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Pulse animation for payment button */
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+.pulse-btn {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Online status pulse */
+@keyframes onlinePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.online-dot {
+  animation: onlinePulse 2s ease-in-out infinite;
+}
+
+/* Emoji picker container */
+.emoji-picker-container {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 50;
+  margin-bottom: 8px;
+}
+
+/* Image in chat */
+.chat-image {
+  max-width: 280px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.chat-image:hover {
+  transform: scale(1.02);
+}
+
+/* Lock overlay gradient */
+.lock-gradient {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(255,255,255,0.8) 30%,
+    rgba(255,255,255,0.95) 100%
+  );
+}
+
+/* Double check marks */
+.check-marks {
+  color: #53bdeb;
+  font-size: 14px;
+}
