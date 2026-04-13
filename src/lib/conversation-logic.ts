@@ -2,7 +2,7 @@ export interface Conversation {
   id: string;
   user_id: string;
   fingerprint: string | null;
-  status: 'active' | 'paid' | 'blocked_free_limit' | 'blocked_paid_limit';
+  status: 'active' | 'active_free' | 'paid' | 'active_paid' | 'blocked_free_limit' | 'blocked_paid_limit';
   free_used: number;
   paid_remaining: number;
   total_paid_cycles: number;
