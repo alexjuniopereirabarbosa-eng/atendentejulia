@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface ConversationSummary {
   id: string;
@@ -48,15 +48,7 @@ export default function AdminPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Load data based on tab
-  useEffect(() => {
-    if (tab === 'conversations') loadConversations();
-    if (tab === 'settings') loadSettings();
-    if (tab === 'assets') loadAssets();
-    if (tab === 'payments') loadPayments();
-  }, [tab]);
-
-  async function loadConversations() {
+  const loadConversations = useCallback(async () => {
     setLoading(true);
     const res = await fetch('/api/admin/conversations');
     if (res.ok) {
@@ -64,7 +56,7 @@ export default function AdminPage() {
       setConversations(data.conversations || []);
     }
     setLoading(false);
-  }
+  }, []);
 
   async function loadMessages(convId: string) {
     setSelectedConv(convId);
@@ -75,7 +67,7 @@ export default function AdminPage() {
     }
   }
 
-  async function loadSettings() {
+  const loadSettings = useCallback(async () => {
     setLoading(true);
     const res = await fetch('/api/admin/settings');
     if (res.ok) {
@@ -83,7 +75,7 @@ export default function AdminPage() {
       setSettings(data);
     }
     setLoading(false);
-  }
+  }, []);
 
   async function saveSettings() {
     await fetch('/api/admin/settings', {
@@ -94,7 +86,7 @@ export default function AdminPage() {
     alert('Configurações salvas!');
   }
 
-  async function loadAssets() {
+  const loadAssets = useCallback(async () => {
     setLoading(true);
     const res = await fetch('/api/admin/assets');
     if (res.ok) {
@@ -102,7 +94,7 @@ export default function AdminPage() {
       setAssets(data.assets || []);
     }
     setLoading(false);
-  }
+  }, []);
 
   async function saveAsset(assetType: string, url: string) {
     await fetch('/api/admin/assets', {
@@ -110,10 +102,10 @@ export default function AdminPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ asset_type: assetType, asset_url: url }),
     });
-    loadAssets();
+    void loadAssets();
   }
 
-  async function loadPayments() {
+  const loadPayments = useCallback(async () => {
     setLoading(true);
     const res = await fetch('/api/admin/payments');
     if (res.ok) {
@@ -121,7 +113,15 @@ export default function AdminPage() {
       setPayments(data.payments || []);
     }
     setLoading(false);
-  }
+  }, []);
+
+  // Load data based on tab
+  useEffect(() => {
+    if (tab === 'conversations') void loadConversations();
+    if (tab === 'settings') void loadSettings();
+    if (tab === 'assets') void loadAssets();
+    if (tab === 'payments') void loadPayments();
+  }, [tab, loadConversations, loadSettings, loadAssets, loadPayments]);
 
   async function forceUnlock(convId: string) {
     if (!confirm('Tem certeza que deseja liberar essa conversa manualmente?')) return;
@@ -130,7 +130,7 @@ export default function AdminPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId: convId }),
     });
-    loadConversations();
+    void loadConversations();
   }
 
   const statusColors: Record<string, string> = {
@@ -357,11 +357,13 @@ export default function AdminPage() {
 }
 
 function AssetEditor({ asset, onSave }: { asset?: Asset; onSave: (url: string) => void }) {
-  const [url, setUrl] = useState(asset?.asset_url || '');
-
-  useEffect(() => {
-    setUrl(asset?.asset_url || '');
-  }, [asset]);
+  const assetUrl = asset?.asset_url || '';
+  const [url, setUrl] = useState(assetUrl);
+  const [prevAssetUrl, setPrevAssetUrl] = useState(assetUrl);
+  if (assetUrl !== prevAssetUrl) {
+    setPrevAssetUrl(assetUrl);
+    setUrl(assetUrl);
+  }
 
   return (
     <div className="flex gap-3 items-end">

@@ -71,7 +71,7 @@ export async function getPaymentById(paymentId: string) {
 export function validateWebhookSignature(
   xSignature: string | null,
   xRequestId: string | null,
-  dataId: string,
+  dataId: string, // eslint-disable-line @typescript-eslint/no-unused-vars
 ): boolean {
   const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
   if (!secret) {

@@ -1,20 +1,16 @@
 'use client';
 
-import { useState, useEffect, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+
+function getInitialAuth(): boolean {
+  if (typeof window === 'undefined') return false;
+  return sessionStorage.getItem('admin_auth') === 'true';
+}
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  const [authenticated, setAuthenticated] = useState(false);
+  const [authenticated, setAuthenticated] = useState(getInitialAuth);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [checking, setChecking] = useState(true);
-
-  useEffect(() => {
-    const saved = sessionStorage.getItem('admin_auth');
-    if (saved === 'true') {
-      setAuthenticated(true);
-    }
-    setChecking(false);
-  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,14 +29,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       setError('Senha incorreta');
     }
   };
-
-  if (checking) {
-    return (
-      <div className="min-h-screen bg-[#111b21] flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-3 border-[#00a884] border-t-transparent rounded-full" />
-      </div>
-    );
-  }
 
   if (!authenticated) {
     return (
