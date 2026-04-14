@@ -198,9 +198,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 11. If just blocked, add system message
+    const previousStatusNormalized: 'active_free' | 'active_paid' | 'blocked_free_limit' | 'blocked_paid_limit' =
+      conv.status === 'active' ? 'active_free' : conv.status === 'paid' ? 'active_paid' : (conv.status || 'active_free') as 'active_free' | 'active_paid' | 'blocked_free_limit' | 'blocked_paid_limit';
     if (
-      (updatedStatus === 'blocked_free_limit' && conv.status !== 'blocked_free_limit') ||
-      (updatedStatus === 'blocked_paid_limit' && conv.status !== 'blocked_paid_limit')
+      (updatedStatus === 'blocked_free_limit' && previousStatusNormalized !== 'blocked_free_limit') ||
+      (updatedStatus === 'blocked_paid_limit' && previousStatusNormalized !== 'blocked_paid_limit')
     ) {
       await supabaseAdmin.from('messages').insert({
         conversation_id: conversationId,
