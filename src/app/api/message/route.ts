@@ -146,34 +146,46 @@ if (process.env.TEST_MODE === 'true') {
       finalSystemPrompt += '\n\nESTA É SUA ÚLTIMA MENSAGEM DESTE CICLO. Despeca-se com carinho: "Vou ter que sair um pouquinho agora, meu amor. Depois volto para falar com você. 💋"';
     }
 
-    // 8. Call OpenAI (or use fallback)
-    let assistantContent: string;
+   // 8. Call OpenAI (or use test mode / fallback)
+let assistantContent: string;
 
-    if (isOpenAIConfigured()) {
-      try {
-        const completion = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: finalSystemPrompt },
-            ...contextMessages,
-          ],
-          max_tokens: 150,
-          temperature: 0.85,
-        });
-        assistantContent = completion.choices[0]?.message?.content || 'Oi, meu amor! 💕';
-      } catch (aiError) {
-        console.error('[Julia] OpenAI error:', aiError);
-        assistantContent = FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
-      }
-    } else {
-      // Fallback when OpenAI is not configured
-      console.warn('[Julia] OpenAI não configurada — usando resposta fallback');
-      if (isLast) {
-        assistantContent = 'Vou ter que sair um pouquinho agora, meu amor. Depois volto para falar com você. 💋';
-      } else {
-        assistantContent = FALLBACK_RESPONSES[freeUsed % FALLBACK_RESPONSES.length];
-      }
-    }
+if (process.env.TEST_MODE === 'true') {
+  console.warn('[Julia] TEST_MODE ativo — sem consumir créditos');
+
+  if (isLast) {
+    assistantContent = 'Vou ter que sair um pouquinho agora, meu amor. Depois volto para falar com você. 💋';
+  } else {
+    assistantContent = `Resposta de teste #${freeUsed + 1} sem gastar créditos.`;
+  }
+} else if (isOpenAIConfigured()) {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: finalSystemPrompt },
+        ...contextMessages,
+      ],
+      max_tokens: 150,
+      temperature: 0.85,
+    });
+
+    assistantContent =
+      completion.choices[0]?.message?.content || 'Oi, meu amor! 💕';
+  } catch (aiError) {
+    console.error('[Julia] OpenAI error:', aiError);
+    assistantContent =
+      FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
+  }
+} else {
+  console.warn('[Julia] OpenAI não configurada — usando resposta fallback');
+
+  if (isLast) {
+    assistantContent =
+      'Vou ter que sair um pouquinho agora, meu amor. Depois volto para falar com você. 💋';
+  } else {
+    assistantContent = FALLBACK_RESPONSES[freeUsed % FALLBACK_RESPONSES.length];
+  }
+}
 
     // 9. Save assistant message
     const { data: assistantMessage, error: assistantMsgError } = await supabaseAdmin
