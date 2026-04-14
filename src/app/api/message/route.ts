@@ -102,33 +102,6 @@ export async function POST(req: NextRequest) {
       conv,
       promptSetting?.setting_value || null
     );
-if (process.env.TEST_MODE === 'true') {
-  const assistantContent = 'Teste funcionando sem gastar créditos.';
-
-  const { data: assistantMessage, error: assistantMsgError } = await supabaseAdmin
-    .from('messages')
-    .insert({
-      conversation_id: conversationId,
-      sender: 'assistant',
-      content: assistantContent,
-      message_type: 'text',
-    })
-    .select()
-    .single();
-
-  if (assistantMsgError) {
-    console.error('Error saving assistant test message:', assistantMsgError);
-    return NextResponse.json({ error: 'Erro ao salvar resposta de teste' }, { status: 500 });
-  }
-
-  return NextResponse.json({
-    userMessage,
-    assistantMessage,
-    conversation: conv,
-    testMode: true,
-  });
-}
-
     
     // 7. Check if this is the last paid/free message
     const freeUsed = conv.free_used || 0;
