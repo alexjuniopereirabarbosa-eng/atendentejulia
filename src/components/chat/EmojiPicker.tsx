@@ -1,8 +1,17 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import data from '@emoji-mart/data';
-import Picker from '@emoji-mart/react';
+
+const EMOJIS = [
+  '😀','😂','🥰','😍','🤩','😎','🥳','😅','😇','🤔',
+  '😢','😭','😤','😡','🤯','😱','🤗','😏','🙄','😴',
+  '👍','👎','👏','🙌','🤝','🙏','✌️','🤞','💪','👋',
+  '❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','💕',
+  '🔥','⭐','✨','💥','🎉','🎊','🎈','🎁','🏆','🚀',
+  '😸','🐶','🐱','🐻','🐼','🐨','🐯','🦁','🐸','🐧',
+  '🍕','🍔','🌮','🍣','🍜','🍰','🎂','🍩','☕','🧃',
+  '⚽','🏀','🎮','🎵','🎸','📱','💻','📚','✏️','🔑',
+];
 
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
@@ -12,7 +21,6 @@ interface EmojiPickerProps {
 export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Close on click outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -24,17 +32,23 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   }, [onClose]);
 
   return (
-    <div ref={containerRef} className="emoji-picker-container fade-in">
-      <Picker
-        data={data}
-        onEmojiSelect={(emoji: { native: string }) => onSelect(emoji.native)}
-        theme="light"
-        locale="pt"
-        previewPosition="none"
-        skinTonePosition="none"
-        maxFrequentRows={2}
-        perLine={8}
-      />
+    <div
+      ref={containerRef}
+      className="absolute bottom-full left-0 mb-1 ml-2 bg-white border border-[#e9edef] rounded-xl shadow-lg p-2 z-50"
+      style={{ width: 288 }}
+    >
+      <div className="grid grid-cols-8 gap-0.5">
+        {EMOJIS.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onSelect(emoji)}
+            className="text-xl p-1 rounded hover:bg-[#f0f2f5] transition-colors"
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
