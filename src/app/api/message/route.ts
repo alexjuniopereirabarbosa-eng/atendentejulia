@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
     // 10. Update counters
     let updatedFreeUsed = freeUsed;
     let updatedPaidRemaining = paidRemaining;
-    let updatedStatus = conv.status || 'active_free';
+    let updatedStatus: 'active_free' | 'active_paid' | 'blocked_free_limit' | 'blocked_paid_limit' = conv.status || 'active_free';
 
     if (updatedStatus === 'active_free') {
       updatedFreeUsed += 1;
