@@ -7,12 +7,12 @@ export async function POST(req: NextRequest) {
     try {
       body = await req.json();
     } catch {
-      // body pode estar vazio
+      // body vazio
     }
 
     const { conversationId, fingerprint } = body;
 
-    // 1. Se vier um conversationId, tentar recuperar a conversa existente
+    // 1. Tentar recuperar pelo conversationId salvo no localStorage
     if (conversationId) {
       const { data: existingConv } = await supabaseAdmin
         .from('conversations')
@@ -34,35 +34,40 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Se vier fingerprint, tentar recuperar conversa ativa pelo fingerprint
+    // 2. Tentar recuperar pelo fingerprint (conversa ativa)
     if (fingerprint) {
-      const { data: convByFingerprint } = await supabaseAdmin
+      const { data: rows } = await supabaseAdmin
         .from('conversations')
         .select('*')
         .eq('fingerprint', fingerprint)
-        .not('status', 'in', '("blocked_free_limit","blocked_paid_limit")')
         .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(5);
 
-      if (convByFingerprint) {
+      const activeConv = (rows || []).find(
+        (c) => c.status !== 'blocked_free_limit' && c.status !== 'blocked_paid_limit'
+      );
+
+      if (activeConv) {
         const { data: messages } = await supabaseAdmin
           .from('messages')
           .select('*')
-          .eq('conversation_id', convByFingerprint.id)
+          .eq('conversation_id', activeConv.id)
           .order('created_at', { ascending: true });
 
         return NextResponse.json({
-          conversation: convByFingerprint,
+          conversation: activeConv,
           messages: messages || [],
         });
       }
     }
 
-    // 3. Criar nova conversa
+    // 3. Criar nova conversa com user_id anonimo
+    const anonymousUserId = crypto.randomUUID();
+
     const { data: newConv, error: convError } = await supabaseAdmin
       .from('conversations')
       .insert({
+        user_id: anonymousUserId,
         free_used: 0,
         paid_remaining: 0,
         status: 'active',
@@ -72,7 +77,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (convError || !newConv) {
-      console.error('Erro na criação de sessão:', convError);
+      console.error('Erro na criacao de sessao:', convError);
       return NextResponse.json({ error: 'Erro ao criar nova conversa' }, { status: 500 });
     }
 
