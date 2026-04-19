@@ -23,14 +23,14 @@ const POSITIVE_REPLY_REGEX =
   /^(sim|claro|quero|pode|manda|mostra|quero ver|pode mandar|ok|okay|beleza)$/i;
 
 const FALLBACK_RESPONSES = [
-  'Oi, tudo bem com você? me chamo julia e como você se chama?',
-  'Me conta uma coisa… você é sempre assim mais tranquilo?',
-  'Tô gostando de falar com você… tem algo diferente.',
-  'Tem uma coisa aqui que eu quase não mostro… quer ver?',
-  'Se eu te mostrar, você promete não sumir depois? 😅',
-  'Posso te mostrar um detalhe agora… mas é só um pedacinho.',
-  'Se fizer sentido pra você, te explico melhor como funciona.',
-  'Não vai desaparecer agora né… fiquei curiosa com você.',
+  'Que bom falar com você… me conta mais.',
+  'Você me deixou curiosa com isso.',
+  'Tô gostando dessa conversa.',
+  'Me conta mais sobre você.',
+  'Interessante… e aí, como tá sendo seu dia?',
+  'Boa pergunta. Me conta, o que você acha?',
+  'Gosto de conversar com você.',
+  'Pode falar, tô te ouvindo.',
 ];
 
 function normalizeText(value: string | null | undefined): string {
@@ -293,13 +293,4 @@ export async function POST(req: NextRequest) {
       conversation: updatedConv || {
         ...conv,
         free_used: updatedFreeUsed,
-        paid_remaining: updatedPaidRemaining,
-        status: updatedStatus,
-        current_cycle_images_sent: newImageCount,
-      },
-    });
-  } catch (err) {
-    console.error('[Julia] Erro geral na rota /api/message:', err);
-    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 });
-  }
-}
+        paid_remain
