@@ -21,7 +21,7 @@ const POSITIVE_REPLY_REGEX =
   /^(sim|claro|quero|pode|manda|mostra|quero ver|pode mandar|ok|okay|beleza)$/i;
 
 const FALLBACK_RESPONSES = [
-  'Oi… não sei porque, mas você me chamou atenção.',
+  'Oi, tudo bem com você? me chamo julia e como você se chama?',
   'Me conta uma coisa… você é sempre assim mais tranquilo?',
   'Tô gostando de falar com você… tem algo diferente.',
   'Tem uma coisa aqui que eu quase não mostro… quer ver?',
