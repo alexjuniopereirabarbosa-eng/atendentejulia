@@ -155,6 +155,7 @@ export async function POST(req: NextRequest) {
           ],
           max_tokens: 150,
           temperature: 0.85,
+          stream: false as const,
         });
         assistantContent =
           completion.choices[0]?.message?.content?.trim() || 'Ola! Pode me contar mais?';
