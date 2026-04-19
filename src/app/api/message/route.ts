@@ -5,7 +5,7 @@ import { buildSystemPrompt } from '@/lib/prompts';
 import type { Conversation } from '@/lib/conversation-logic';
 
 // ajuste para sua mídia real
-const DEMO_IMAGE_URL = process.env.JULIA_DEMO_IMAGE_URL || 'https://seu-dominio.com/demo.jpg';
+const DEMO_IMAGE_URL = process.env.JULIA_DEMO_IMAGE_URL || 'https://i.ibb.co/jZ1d1Pcs/quero-mais-cenarios-202604061731.jpg';
 
 // convites de prévia que o sistema pode reconhecer no histórico recente
 const PREVIEW_INVITES = [
