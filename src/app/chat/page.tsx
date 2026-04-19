@@ -19,7 +19,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     initSession();
-  }, [initSession]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Poll for payment status changes (checks every 5s when blocked)
   useEffect(() => {

@@ -79,19 +79,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Init session
   initSession: async () => {
     const state = get();
-    if (state.isLoading) return;
-    
+    if (state.isLoading || state.isInitialized) return;
+
     set({ isLoading: true, error: null });
-    
+
     try {
       // Import fingerprint dynamically (client-side only)
       const { getBrowserFingerprint } = await import('@/lib/fingerprint');
       const fingerprint = await getBrowserFingerprint();
 
+      // Recuperar conversationId salvo localmente
+      const savedConversationId =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('julia_conversation_id')
+          : null;
+
       const res = await fetch('/api/session/init', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fingerprint }),
+        body: JSON.stringify({
+          fingerprint,
+          conversationId: savedConversationId || undefined,
+        }),
       });
 
       if (!res.ok) {
@@ -99,7 +108,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const data = await res.json();
-      
+
+      // Persistir o conversationId para recuperar na próxima visita
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('julia_conversation_id', data.conversation.id);
+      }
+
       set({
         conversationId: data.conversation.id,
         userId: data.conversation.user_id,
@@ -166,11 +180,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const data = await res.json();
 
-      // Replace temp message with real ones and add assistant response
+      // Replace temp message with real ones and add assistant response(s)
       set((s) => {
         const filtered = s.messages.filter((m) => m.id !== tempUserMsg.id);
+        const newMsgs = [data.userMessage, data.assistantMessage];
+        if (data.imageMessage) newMsgs.push(data.imageMessage);
+        if (data.followupMessage) newMsgs.push(data.followupMessage);
         return {
-          messages: [...filtered, data.userMessage, data.assistantMessage],
+          messages: [...filtered, ...newMsgs],
           status: data.conversation.status,
           freeUsed: data.conversation.free_used,
           paidRemaining: data.conversation.paid_remaining,

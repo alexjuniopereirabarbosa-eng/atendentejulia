@@ -3,17 +3,16 @@ import { supabaseAdmin } from '@/lib/supabase/server';
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Receber no body o conversationId de forma segura
-    let body = {};
+    let body: { conversationId?: string; fingerprint?: string } = {};
     try {
       body = await req.json();
     } catch {
       // body pode estar vazio
     }
 
-    const { conversationId } = body as { conversationId?: string };
+    const { conversationId, fingerprint } = body;
 
-    // 2. Se conversationId existir, tentar buscar no Supabase
+    // 1. Se vier um conversationId, tentar recuperar a conversa existente
     if (conversationId) {
       const { data: existingConv } = await supabaseAdmin
         .from('conversations')
@@ -22,7 +21,6 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (existingConv) {
-        // Encontrou a conversa, buscar mensagens ordenadas
         const { data: messages } = await supabaseAdmin
           .from('messages')
           .select('*')
@@ -36,13 +34,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Se NÃO existir ou não enviar ID, criar nova conversa
+    // 2. Se vier fingerprint, tentar recuperar conversa ativa pelo fingerprint
+    if (fingerprint) {
+      const { data: convByFingerprint } = await supabaseAdmin
+        .from('conversations')
+        .select('*')
+        .eq('fingerprint', fingerprint)
+        .not('status', 'in', '("blocked_free_limit","blocked_paid_limit")')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (convByFingerprint) {
+        const { data: messages } = await supabaseAdmin
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', convByFingerprint.id)
+          .order('created_at', { ascending: true });
+
+        return NextResponse.json({
+          conversation: convByFingerprint,
+          messages: messages || [],
+        });
+      }
+    }
+
+    // 3. Criar nova conversa
     const { data: newConv, error: convError } = await supabaseAdmin
       .from('conversations')
       .insert({
         free_used: 0,
         paid_remaining: 0,
         status: 'active',
+        fingerprint: fingerprint || null,
       })
       .select()
       .single();
@@ -52,12 +76,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Erro ao criar nova conversa' }, { status: 500 });
     }
 
-    // Retorna a conversa criada e lista de mensagens vazia
     return NextResponse.json({
       conversation: newConv,
       messages: [],
     });
-
   } catch (err) {
     console.error('Erro geral no Session Init:', err);
     return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 });
