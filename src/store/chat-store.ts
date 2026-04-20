@@ -60,11 +60,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setConversation: (conv) =>
     set({
       conversationId: conv.id,
-      userId: conv.user_id,
+      userId: conv.user_id ?? null,
       status: conv.status,
       freeUsed: conv.free_used,
       paidRemaining: conv.paid_remaining,
-      totalPaidCycles: conv.total_paid_cycles,
+      totalPaidCycles: conv.total_paid_cycles ?? 0,
     }),
 
   setMessages: (msgs) => set({ messages: msgs }),
@@ -120,7 +120,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         status: data.conversation.status,
         freeUsed: data.conversation.free_used,
         paidRemaining: data.conversation.paid_remaining,
-        totalPaidCycles: data.conversation.total_paid_cycles,
+        totalPaidCycles: data.conversation.total_paid_cycles ?? 0,
         messages: data.messages || [],
         isInitialized: true,
       });
@@ -191,7 +191,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           status: data.conversation.status,
           freeUsed: data.conversation.free_used,
           paidRemaining: data.conversation.paid_remaining,
-          totalPaidCycles: data.conversation.total_paid_cycles,
+          totalPaidCycles: data.conversation.total_paid_cycles ?? 0,
         };
       });
 
@@ -229,7 +229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           status: data.conversation.status,
           freeUsed: data.conversation.free_used,
           paidRemaining: data.conversation.paid_remaining,
-          totalPaidCycles: data.conversation.total_paid_cycles,
+          totalPaidCycles: data.conversation.total_paid_cycles ?? 0,
           messages: data.messages || [],
         });
 

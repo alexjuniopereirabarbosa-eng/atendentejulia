@@ -63,12 +63,12 @@ export function buildSystemPrompt(
   let prompt = `${basePrompt}\n\n${phaseInstruction}`;
 
   // Add image context if in paid phase
-  if (phase === 'paid' && conversation.current_cycle_images_sent < 2) {
+  if (phase === 'paid' && (conversation.current_cycle_images_sent ?? 0) < 2) {
     prompt += `\n\nVocê pode mencionar naturalmente que tem uma foto para mostrar, mas NÃO envie a imagem no texto. Apenas comente sobre. O sistema enviará a imagem separadamente quando apropriado.`;
   }
 
   // If this is close to the end of paid messages
-  if (conversation.status === 'paid' && conversation.paid_remaining <= 3) {
+  if ((conversation.status === 'paid' || conversation.status === 'active_paid') && (conversation.paid_remaining || 0) <= 3) {
     prompt += `\n\nATENÇÃO: A conversa está terminando em breve. Nas próximas mensagens, comece a se despedir de forma carinhosa. Na última mensagem, diga: "Vou ter que sair um pouquinho agora, meu amor. Depois volto para falar com você. 💋"`;
   }
 

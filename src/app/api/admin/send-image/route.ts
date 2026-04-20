@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Conversa não está no ciclo pago' }, { status: 400 });
     }
 
-    if (conversation.current_cycle_images_sent >= 2) {
+    if ((conversation.current_cycle_images_sent ?? 0) >= 2) {
       return NextResponse.json({ error: 'Limite de imagens do ciclo atingido' }, { status: 400 });
     }
 
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       .eq('is_active', true)
       .order('sort_order', { ascending: true });
 
-    const idx = imageIndex ?? conversation.current_cycle_images_sent;
+    const idx = imageIndex ?? (conversation.current_cycle_images_sent ?? 0);
     const image = images?.[idx];
 
     if (!image) {
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     await supabaseAdmin
       .from('conversations')
       .update({
-        current_cycle_images_sent: conversation.current_cycle_images_sent + 1,
+        current_cycle_images_sent: (conversation.current_cycle_images_sent ?? 0) + 1,
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId);
