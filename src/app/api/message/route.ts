@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
-import { getOpenAIClient, isOpenAIConfigured } from '@/lib/openai';
+import { isOpenAIConfigured } from '@/lib/openai';
 import { buildSystemPrompt } from '@/lib/prompts';
 import type { Conversation } from '@/lib/conversation-logic';
 
@@ -140,20 +140,28 @@ export async function POST(req: NextRequest) {
       assistantContent = 'Entao olha essa previa aqui';
     } else if (isOpenAIConfigured()) {
       try {
-        const openai = getOpenAIClient();
-        const completion = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: finalSystemPrompt },
-            ...contextMessages,
-          ],
-          max_tokens: 150,
-          temperature: 0.85,
-          stream: false,
+        const openaiKey = process.env.OPENAI_API_KEY!;
+        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + openaiKey,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: finalSystemPrompt },
+              ...contextMessages,
+            ],
+            max_tokens: 150,
+            temperature: 0.85,
+          }),
         });
-        assistantContent =
-          (completion as { choices: Array<{ message: { content: string | null } }> })
-            .choices[0]?.message?.content?.trim() || 'Ola! Pode me contar mais?';
+        if (!aiRes.ok) {
+          throw new Error('OpenAI HTTP ' + aiRes.status);
+        }
+        const aiJson = await aiRes.json() as { choices: Array<{ message: { content: string | null } }> };
+        assistantContent = aiJson.choices[0]?.message?.content?.trim() || 'Ola! Pode me contar mais?';
       } catch (aiError) {
         console.error('[Julia] OpenAI error:', aiError);
         assistantContent = FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
