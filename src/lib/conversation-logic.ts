@@ -64,9 +64,9 @@ export function getConversationPhase(conversation: Conversation): string {
     conversation.free_used + (totalPaidCycles * PAID_LIMIT - paidRemaining);
 
   if (conversation.status === 'paid' || conversation.status === 'active_paid') return 'paid';
-  if (totalAssistantMessages <= 5) return 'welcome';
-  if (totalAssistantMessages <= 10) return 'connection';
-  if (totalAssistantMessages <= 15) return 'retention';
+  if (totalAssistantMessages <= 3) return 'welcome';   // msgs 1-3: conexão/nome/dia
+  if (totalAssistantMessages <= 7) return 'connection'; // msgs 4-7: quebra de padrão/curiosidade
+  if (totalAssistantMessages <= 15) return 'retention'; // msgs 8-15: apresentação do produto
   return 'paid';
 }
 
