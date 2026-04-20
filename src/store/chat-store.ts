@@ -1,250 +1,135 @@
 import { create } from 'zustand';
-import type { Conversation, Message } from '@/lib/conversation-logic';
 
-interface ChatState {
-  // Session
-  conversationId: string | null;
-  userId: string | null;
+// ─── Types ─────────────────────────────────────────────────────────────────
 
-  // Conversation state
-  status: Conversation['status'];
-  freeUsed: number;
-  paidRemaining: number;
-  totalPaidCycles: number;
-
-  // Messages
-  messages: Message[];
-
-  // UI
-  isTyping: boolean;
-  isLoading: boolean;
-  isSending: boolean;
-  isInitialized: boolean;
-  error: string | null;
-  showPaymentModal: boolean;
-
-  // Actions
-  setConversation: (conv: Conversation) => void;
-  setMessages: (msgs: Message[]) => void;
-  addMessage: (msg: Message) => void;
-  setIsTyping: (val: boolean) => void;
-  setIsLoading: (val: boolean) => void;
-  setIsSending: (val: boolean) => void;
-  setError: (err: string | null) => void;
-  setShowPaymentModal: (val: boolean) => void;
-  setInitialized: (val: boolean) => void;
-
-  // Async actions
-  initSession: () => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
-  refreshConversation: () => Promise<void>;
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
 }
 
+interface ChatState {
+  // In-memory conversation — cleared on page reload
+  messages: ChatMessage[];
+
+  // UI state
+  isReady: boolean;      // true once session/init confirmed server is reachable
+  isSending: boolean;
+  isTyping: boolean;
+  error: string | null;
+
+  // Actions
+  init: () => Promise<void>;
+  sendMessage: (content: string) => Promise<void>;
+  clearError: () => void;
+}
+
+// ─── Helper ────────────────────────────────────────────────────────────────
+
+function makeId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ─── Store ─────────────────────────────────────────────────────────────────
+
 export const useChatStore = create<ChatState>((set, get) => ({
-  // Initial state
-  conversationId: null,
-  userId: null,
-  status: 'active',
-  freeUsed: 0,
-  paidRemaining: 0,
-  totalPaidCycles: 0,
   messages: [],
-  isTyping: false,
-  isLoading: false,
+  isReady: false,
   isSending: false,
-  isInitialized: false,
+  isTyping: false,
   error: null,
-  showPaymentModal: false,
 
-  // Setters
-  setConversation: (conv) =>
-    set({
-      conversationId: conv.id,
-      userId: conv.user_id ?? null,
-      status: conv.status,
-      freeUsed: conv.free_used,
-      paidRemaining: conv.paid_remaining,
-      totalPaidCycles: conv.total_paid_cycles ?? 0,
-    }),
+  clearError: () => set({ error: null }),
 
-  setMessages: (msgs) => set({ messages: msgs }),
-  addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
-  setIsTyping: (val) => set({ isTyping: val }),
-  setIsLoading: (val) => set({ isLoading: val }),
-  setIsSending: (val) => set({ isSending: val }),
-  setError: (err) => set({ error: err }),
-  setShowPaymentModal: (val) => set({ showPaymentModal: val }),
-  setInitialized: (val) => set({ isInitialized: val }),
-
-  // ── Init session ────────────────────────────────────────────────────────
-  initSession: async () => {
-    const state = get();
-    // Guard: never double-init
-    if (state.isLoading || state.isInitialized) return;
-
-    set({ isLoading: true, error: null });
+  // ── init ─────────────────────────────────────────────────────────────────
+  // Just pings the server to confirm it's reachable. No DB, no localStorage.
+  init: async () => {
+    if (get().isReady) return;
 
     try {
-      // Retrieve persisted conversationId from localStorage
-      const savedConversationId =
-        typeof window !== 'undefined'
-          ? localStorage.getItem('julia_conversation_id')
-          : null;
-
-      const res = await fetch('/api/session/init', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conversationId: savedConversationId || undefined,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error('Erro ao iniciar sessão');
-      }
-
-      const data = await res.json();
-
-      // Persist conversationId so reload recovers the same conversation
-      if (typeof window !== 'undefined' && data.conversation?.id) {
-        localStorage.setItem('julia_conversation_id', data.conversation.id);
-      }
-
-      set({
-        conversationId: data.conversation.id,
-        userId: data.conversation.user_id ?? null,
-        status: data.conversation.status,
-        freeUsed: data.conversation.free_used,
-        paidRemaining: data.conversation.paid_remaining,
-        totalPaidCycles: data.conversation.total_paid_cycles ?? 0,
-        messages: data.messages || [],
-        isInitialized: true,
-        error: null,
-      });
+      const res = await fetch('/api/session/init', { method: 'POST' });
+      if (!res.ok) throw new Error('Servidor indisponível');
+      set({ isReady: true, error: null });
     } catch (err) {
       set({
-        error: err instanceof Error ? err.message : 'Erro desconhecido',
-        isInitialized: false,
+        error: err instanceof Error ? err.message : 'Erro ao conectar com o servidor',
       });
-    } finally {
-      set({ isLoading: false });
     }
   },
 
-  // ── Send message ────────────────────────────────────────────────────────
+  // ── sendMessage ──────────────────────────────────────────────────────────
   sendMessage: async (content: string) => {
     const state = get();
-    if (!state.conversationId || state.isSending) return;
+    if (state.isSending) return;
 
     const trimmed = content.trim();
     if (!trimmed) return;
 
-    set({ isSending: true, error: null });
-
-    // Optimistically add user message
-    const tempUserMsg: Message = {
-      id: `temp-${Date.now()}`,
-      conversation_id: state.conversationId,
-      sender: 'user',
+    // Add user message to in-memory store immediately
+    const userMsg: ChatMessage = {
+      id: makeId(),
+      role: 'user',
       content: trimmed,
-      message_type: 'text',
-      image_url: null,
-      created_at: new Date().toISOString(),
+      timestamp: Date.now(),
     };
-    set((s) => ({ messages: [...s.messages, tempUserMsg] }));
 
-    // Show typing indicator
-    set({ isTyping: true });
+    set((s) => ({
+      messages: [...s.messages, userMsg],
+      isSending: true,
+      isTyping: true,
+      error: null,
+    }));
 
     try {
+      // Build the history array to send to the backend
+      // Include all messages BEFORE the current one (backend adds current separately)
+      const currentMessages = get().messages;
+      const historyToSend = currentMessages
+        .slice(0, -1) // all except the user message we just added
+        .map((m) => ({ role: m.role, content: m.content }));
+
       const res = await fetch('/api/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          conversationId: state.conversationId,
-          content: trimmed,
+          userMessage: trimmed,
+          history: historyToSend,
         }),
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-
-        if (errData.error === 'LIMIT_REACHED') {
-          set({ status: 'blocked_free_limit' });
-          throw new Error('LIMIT_REACHED');
-        }
-
-        throw new Error(errData.error || 'Erro ao enviar mensagem');
-      }
-
       const data = await res.json();
 
-      // Replace temp message with confirmed messages from server
-      set((s) => {
-        const filtered = s.messages.filter((m) => m.id !== tempUserMsg.id);
-        const newMsgs: Message[] = [data.userMessage, data.assistantMessage];
-        if (data.imageMessage) newMsgs.push(data.imageMessage);
-        if (data.followupMessage) newMsgs.push(data.followupMessage);
-        return {
-          messages: [...filtered, ...newMsgs],
-          status: data.conversation.status,
-          freeUsed: data.conversation.free_used,
-          paidRemaining: data.conversation.paid_remaining,
-          totalPaidCycles: data.conversation.total_paid_cycles ?? 0,
-        };
-      });
-
-      // Show payment modal if blocked after this response
-      if (
-        data.conversation.status === 'blocked_free_limit' ||
-        data.conversation.status === 'blocked_paid_limit'
-      ) {
-        set({ showPaymentModal: true });
+      if (!res.ok) {
+        throw new Error(data.error || `Erro ${res.status}`);
       }
-    } catch (err) {
-      const isLimitReached =
-        err instanceof Error && err.message === 'LIMIT_REACHED';
 
-      // Remove temp message on error
+      if (!data.reply) {
+        throw new Error('Resposta vazia da IA');
+      }
+
+      // Add assistant reply to in-memory store
+      const assistantMsg: ChatMessage = {
+        id: makeId(),
+        role: 'assistant',
+        content: data.reply,
+        timestamp: Date.now(),
+      };
+
       set((s) => ({
-        messages: s.messages.filter((m) => m.id !== tempUserMsg.id),
-        error: isLimitReached
-          ? null
-          : err instanceof Error
-          ? err.message
-          : 'Erro ao enviar',
+        messages: [...s.messages, assistantMsg],
+        isSending: false,
+        isTyping: false,
+        error: null,
       }));
-    } finally {
-      set({ isSending: false, isTyping: false });
-    }
-  },
-
-  // ── Refresh conversation (used for payment polling) ─────────────────────
-  refreshConversation: async () => {
-    const state = get();
-    if (!state.conversationId) return;
-
-    try {
-      const res = await fetch(`/api/conversation?id=${state.conversationId}`);
-      if (res.ok) {
-        const data = await res.json();
-        set({
-          status: data.conversation.status,
-          freeUsed: data.conversation.free_used,
-          paidRemaining: data.conversation.paid_remaining,
-          totalPaidCycles: data.conversation.total_paid_cycles ?? 0,
-          messages: data.messages || [],
-        });
-
-        if (
-          data.conversation.status !== 'blocked_free_limit' &&
-          data.conversation.status !== 'blocked_paid_limit'
-        ) {
-          set({ showPaymentModal: false });
-        }
-      }
-    } catch {
-      // Silent fail on refresh
+    } catch (err) {
+      // Remove the user message on error so user can retry
+      set((s) => ({
+        messages: s.messages.filter((m) => m.id !== userMsg.id),
+        isSending: false,
+        isTyping: false,
+        error: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
+      }));
     }
   },
 }));

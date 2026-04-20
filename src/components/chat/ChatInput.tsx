@@ -10,9 +10,6 @@ export default function ChatInput() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const isSending = useChatStore((s) => s.isSending);
-  const status = useChatStore((s) => s.status);
-
-  const isBlocked = status === 'blocked_free_limit' || status === 'blocked_paid_limit';
 
   // Auto-resize textarea
   useEffect(() => {
@@ -23,13 +20,11 @@ export default function ChatInput() {
   }, [text]);
 
   const handleSend = () => {
-    if (!text.trim() || isSending || isBlocked) return;
+    if (!text.trim() || isSending) return;
     sendMessage(text.trim());
     setText('');
     setShowEmoji(false);
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-    }
+    if (inputRef.current) inputRef.current.style.height = 'auto';
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -39,11 +34,6 @@ export default function ChatInput() {
     }
   };
 
-  const handleEmojiSelect = (emoji: string) => {
-    setText((prev) => prev + emoji);
-    inputRef.current?.focus();
-  };
-
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     handleSend();
@@ -51,24 +41,19 @@ export default function ChatInput() {
 
   return (
     <div className="relative shrink-0 bg-[#f0f2f5] border-t border-[#e9edef]">
-      {/* Emoji picker */}
-      {showEmoji && !isBlocked && (
+      {showEmoji && (
         <EmojiPicker
-          onSelect={handleEmojiSelect}
+          onSelect={(emoji) => { setText((p) => p + emoji); inputRef.current?.focus(); }}
           onClose={() => setShowEmoji(false)}
         />
       )}
 
-      <form
-        onSubmit={handleSubmit}
-        className="flex items-end gap-2 px-4 py-2.5"
-      >
+      <form onSubmit={handleSubmit} className="flex items-end gap-2 px-4 py-2.5">
         {/* Emoji button */}
         <button
           type="button"
           onClick={() => setShowEmoji(!showEmoji)}
-          disabled={isBlocked}
-          className="p-2 rounded-full hover:bg-black/5 transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed self-end mb-0.5"
+          className="p-2 rounded-full hover:bg-black/5 transition-colors shrink-0 self-end mb-0.5"
           aria-label="Emoji"
         >
           <svg viewBox="0 0 24 24" width="24" height="24" fill="#54656f">
@@ -77,16 +62,16 @@ export default function ChatInput() {
         </button>
 
         {/* Text input */}
-        <div className="flex-1 bg-white rounded-lg border border-transparent focus-within:border-transparent overflow-hidden">
+        <div className="flex-1 bg-white rounded-lg overflow-hidden">
           <textarea
             ref={inputRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isBlocked ? 'Conversa bloqueada...' : 'Mensagem'}
-            disabled={isBlocked || isSending}
+            placeholder="Mensagem"
+            disabled={isSending}
             rows={1}
-            className="w-full px-3 py-2 text-[15px] text-[#111b21] placeholder-[#667781] bg-transparent border-none outline-none resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-3 py-2 text-[15px] text-[#111b21] placeholder-[#667781] bg-transparent border-none outline-none resize-none disabled:opacity-50"
             style={{ maxHeight: 120 }}
             id="chat-input"
           />
@@ -95,8 +80,8 @@ export default function ChatInput() {
         {/* Send button */}
         <button
           type="submit"
-          disabled={!text.trim() || isSending || isBlocked}
-          className="p-2 rounded-full hover:bg-black/5 transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed self-end mb-0.5"
+          disabled={!text.trim() || isSending}
+          className="p-2 rounded-full hover:bg-black/5 transition-colors shrink-0 disabled:opacity-40 self-end mb-0.5"
           aria-label="Enviar"
           id="send-button"
         >
@@ -106,7 +91,6 @@ export default function ChatInput() {
         </button>
       </form>
 
-      {/* Transparency notice */}
       <div className="text-center pb-1">
         <span className="text-[10px] text-[#8696a0] select-none">
           Você está conversando com uma assistente virtual.

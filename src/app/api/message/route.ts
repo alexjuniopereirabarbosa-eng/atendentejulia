@@ -1,343 +1,231 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabase/server';
-import { isOpenAIConfigured } from '@/lib/openai';
 
-// ─── Stage definitions ──────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────────
 
-type Stage = 'inicio' | 'nome' | 'conexao' | 'curiosidade' | 'produto' | 'fechamento';
+type Stage = 'inicio' | 'nome' | 'conexao' | 'curiosidade' | 'continuidade';
 
-const STAGE_ORDER: Stage[] = ['inicio', 'nome', 'conexao', 'curiosidade', 'produto', 'fechamento'];
+interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
-/** Derive current stage from the number of assistant messages already sent */
-function getStageFromCount(assistantCount: number): Stage {
+// ─── Stage derivation ──────────────────────────────────────────────────────
+
+/**
+ * Derive the current conversation stage from the in-memory history
+ * sent by the frontend. No DB, no localStorage — pure logic.
+ *
+ * Stage rules:
+ *   inicio      → no assistant messages yet (first user message)
+ *   nome        → 1 assistant message sent (Julia greeted, waiting for name)
+ *   conexao     → 2 assistant messages (Julia received name, building connection)
+ *   curiosidade → 3-4 assistant messages (time to spark curiosity)
+ *   continuidade → 5+ assistant messages (free, natural conversation)
+ */
+function deriveStage(history: HistoryMessage[]): Stage {
+  const assistantCount = history.filter((m) => m.role === 'assistant').length;
   if (assistantCount === 0) return 'inicio';
   if (assistantCount === 1) return 'nome';
-  if (assistantCount <= 3) return 'conexao';
-  if (assistantCount <= 6) return 'curiosidade';
-  if (assistantCount <= 12) return 'produto';
-  return 'fechamento';
+  if (assistantCount <= 2) return 'conexao';
+  if (assistantCount <= 4) return 'curiosidade';
+  return 'continuidade';
 }
 
-/** Advance to the next stage (never go backwards) */
-function nextStage(current: Stage): Stage {
-  const idx = STAGE_ORDER.indexOf(current);
-  return idx < STAGE_ORDER.length - 1 ? STAGE_ORDER[idx + 1] : 'fechamento';
-}
+// ─── Extract client name from history ─────────────────────────────────────
 
-// ─── Extract client name from message history ──────────────────────────────
-
-function extractClientName(
-  messages: Array<{ sender: string; content: string | null }>
-): string | null {
-  // Find the assistant message that asked for the name, then look at the next user message
-  for (let i = 0; i < messages.length - 1; i++) {
-    const msg = messages[i];
-    const next = messages[i + 1];
+function extractClientName(history: HistoryMessage[]): string | null {
+  // Find the assistant message that asked for the name
+  for (let i = 0; i < history.length - 1; i++) {
+    const msg = history[i];
+    const next = history[i + 1];
     if (
-      msg.sender === 'assistant' &&
-      msg.content &&
-      (msg.content.toLowerCase().includes('como se chama') ||
-        msg.content.toLowerCase().includes('qual é o seu nome') ||
-        msg.content.toLowerCase().includes('seu nome')) &&
-      next.sender === 'user' &&
-      next.content
+      msg.role === 'assistant' &&
+      msg.content.toLowerCase().includes('como se chama') &&
+      next.role === 'user' &&
+      next.content.trim()
     ) {
-      // Extract first word/token that looks like a name (capitalised or simple word)
       const raw = next.content.trim();
-      // Remove common non-name words
-      const cleaned = raw
-        .replace(/[^a-záàâãéèêíïóôõöúüçñ\s]/gi, '')
-        .trim()
-        .split(/\s+/)[0];
-      if (cleaned && cleaned.length >= 2 && cleaned.length <= 30) {
-        return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
+      const word = raw.replace(/[^a-záàâãéèêíïóôõöúüçñ\s]/gi, '').trim().split(/\s+/)[0];
+      if (word && word.length >= 2 && word.length <= 30) {
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
       }
     }
   }
   return null;
 }
 
-// ─── Build system prompt per stage ────────────────────────────────────────
+// ─── System prompt per stage ───────────────────────────────────────────────
 
-function buildStagePrompt(stage: Stage, clientName: string | null): string {
+function buildSystemPrompt(stage: Stage, clientName: string | null): string {
   const name = clientName || 'você';
 
-  const base = `Você é Julia, uma mulher brasileira real — simpática, envolvente, natural.
-Você trabalha com moda e adora recomendar peças que ficam lindas.
-Fale como uma amiga no WhatsApp: informal, fluido, sem parecer script.
-REGRAS ABSOLUTAS:
-- Máximo 2 frases curtas por resposta.
-- NUNCA repita o que já disse antes na conversa.
-- NUNCA use frases genéricas como "Que legal!" ou "Nossa!".
-- NUNCA mencione que tem etapas ou roteiro.
-- Nunca afirme ser humana se perguntarem. Desvie com leveza.
-- Sem linguagem sexual ou vulgar.`;
+  const base = `Você é Julia, uma mulher brasileira — simpática, leve, natural, envolvente, calorosa sem exagero.
+Você conversa como uma pessoa real no WhatsApp: informal, fluido, espontâneo.
+Você nunca parece robótica, nunca usa cara de atendimento automático, nunca é fria.
 
-  const stageInstructions: Record<Stage, string> = {
+REGRAS ABSOLUTAS — NUNCA QUEBRE ESTAS REGRAS:
+1. Máximo 2 frases curtas por resposta. Seja direta e natural.
+2. NUNCA repita algo que você já disse nesta conversa. Releia o histórico antes de responder.
+3. NUNCA use frases genéricas como "Que legal!", "Nossa!", "Que ótimo!", "Pode falar, tô te ouvindo".
+4. NUNCA faça a mesma pergunta duas vezes.
+5. NUNCA responda fora do contexto do que o cliente disse.
+6. NUNCA entre em loop de frases como "Gosto de conversar com você" ou "Me conta mais sobre você".
+7. Faça apenas UMA pergunta por mensagem, nunca duas.
+8. Adapte SEMPRE sua resposta ao que o cliente acabou de escrever.
+9. Varie a forma de falar a cada mensagem — nunca use a mesma estrutura de frase duas vezes seguidas.
+10. Se a conversa estiver indo bem, não force curiosidade — deixe fluir naturalmente.
+11. Nunca afirme ser humana se perguntarem. Desvie com leveza e bom humor.
+12. Sem linguagem sexual, vulgar ou manipulação emocional.`;
+
+  const stageGuides: Record<Stage, string> = {
     inicio: `
-INSTRUÇÃO DESTA MENSAGEM:
-Esta é a sua PRIMEIRA mensagem. Não sabe o nome do cliente ainda.
-Escreva exatamente: "Oi, tudo bem? Me chamo Julia. E você, como se chama?" — pode variar levemente mas mantenha essa essência.
-Não diga mais nada além disso.`,
+ETAPA ATUAL: INÍCIO
+Esta é sua primeira resposta. O cliente acabou de mandar a primeira mensagem.
+Responda exatamente assim (pode variar levíssimamente mas mantenha a essência):
+"Oi, tudo bem? Me chamo Julia. E você, como se chama?"
+Nada mais. Só isso.`,
 
     nome: `
-INSTRUÇÃO DESTA MENSAGEM:
-Você acabou de receber o nome do cliente.
-Responda com: "Prazer te conhecer, [nome do cliente]! Como está sendo seu dia hoje?" — adapte ao que ele escreveu.
-Seja calorosa mas curta. Só isso.`,
+ETAPA ATUAL: NOME
+O cliente respondeu sua primeira mensagem. Você ainda não sabe o nome dele ou ele acabou de dizer.
+Se ele disse o nome, responda de forma calorosa usando o nome dele:
+"Prazer te conhecer, [nome]! Como está sendo seu dia hoje?"
+Se ele não disse o nome claramente, pergunte de novo de forma leve e natural.
+Seja breve. Só isso.`,
 
     conexao: `
-INSTRUÇÃO DESTA MENSAGEM:
-Você conhece o nome: ${name}.
-O cliente respondeu sobre o dia dele. Mostre interesse genuíno no que ele disse.
-Faça UMA pergunta leve e pessoal sobre algo que ele mencionou — não sobre produto.
-Ainda não fale de moda ou produto. Só conexão.`,
+ETAPA ATUAL: CONEXÃO
+Você já sabe o nome: ${name}.
+O cliente respondeu sobre o dia dele. Responda ao que ele disse com genuíno interesse.
+Mostre que você leu e entendeu o que ele falou. Faça uma pergunta leve baseada no que ele contou.
+NÃO fale de produto. NÃO force nada. Só conexão natural.`,
 
     curiosidade: `
-INSTRUÇÃO DESTA MENSAGEM:
-Você já tem uma conexão com ${name}.
-Agora introduza algo de forma espontânea, como se tivesse lembrado de algo enquanto conversava.
-Use uma frase como estas (varie, não copie igual):
-- "Posso te mostrar uma coisa que fiz hoje… mas tô até com vergonha 😅"
-- "Achei uma peça aqui que eu precisava mostrar pra alguém…"
-- "Sabe quando você vê algo e fica tipo 'nossa, isso é demais'? Tô assim agora."
-Gere curiosidade real. Não explique o produto ainda. Deixe ${name} querer saber mais.`,
+ETAPA ATUAL: CURIOSIDADE
+Você já tem uma boa conexão com ${name}.
+Em um momento natural, introduza algo de forma espontânea, como se tivesse lembrado de uma coisa enquanto conversava.
+Varie a frase — escolha UMA dessas abordagens ou crie algo parecido:
+- "Posso te mostrar uma coisa que fiz hoje... mas tô com um pouquinho de vergonha 😅"
+- "Eu fiz uma coisinha hoje e fiquei com vergonha, mas se você quiser eu te mostro"
+- "Sabe quando você faz algo e fica tipo 'será que foi bom?'... Tô assim agora 😄"
+Isso deve soar espontâneo, não forçado. Só faça se a conversa estiver fluindo bem.
+Se a conversa ainda estiver em outro assunto interessante, continue nele e guarde a curiosidade para depois.`,
 
-    produto: `
-INSTRUÇÃO DESTA MENSAGEM:
-${name} está curioso(a). Apresente o produto de forma natural, como recomendação pessoal.
-Use frases como (varie):
-- "Eu separei umas peças hoje que ficaram lindas no corpo… sério."
-- "O tecido cai super bem, não aperta, não transparece."
-- "Eu mesma fiquei surpresa com a qualidade, parece muito mais caro do que é."
-Faça UMA pergunta para personalizar: "Você curte mais estilo básico ou algo mais chamativo?" ou "Usa mais no dia a dia ou pra sair?"
-Adapte ao que ${name} já disse sobre si.`,
-
-    fechamento: `
-INSTRUÇÃO DESTA MENSAGEM:
-${name} está engajado(a). Conduza para a ação — ver produto, pedir foto, comprar.
-Use frases como:
-- "Se quiser posso te mostrar melhor… te mando aqui pra você ver com seus próprios olhos."
-- "Te mostro como ficou no corpo, você entende na hora."
-- "Posso te mandar aqui pra você ver? Tenho certeza que vai gostar."
-Se perguntar preço: fale do valor (qualidade, tecido) antes do número.
-Mantenha o tom de amiga que recomenda algo que ela mesma amou.`,
+    continuidade: `
+ETAPA ATUAL: CONTINUIDADE
+A conversa está fluindo. Continue de forma leve e natural.
+Responda ao que ${name} disse. Mostre interesse genuíno. Faça uma pergunta relacionada ao que ele comentou.
+Guie a conversa com leveza — sem forçar, sem script, sem frases prontas.
+Se ainda não fez a "quebra de curiosidade" (mostrar algo com vergonha), pode fazer agora se o momento for natural.
+Se já fez, continue a conversa no rumo que for mais vivo e interessante.`,
   };
 
-  return `${base}\n\n${stageInstructions[stage]}`;
+  return `${base}\n\n${stageGuides[stage]}`;
 }
-
-// ─── Fallback responses per stage ─────────────────────────────────────────
-
-const FALLBACKS: Record<Stage, string[]> = {
-  inicio: ['Oi, tudo bem? Me chamo Julia. E você, como se chama?'],
-  nome: ['Prazer te conhecer! Como está sendo seu dia hoje?'],
-  conexao: ['Que bom falar com você. Me conta mais, como costuma ser sua rotina?'],
-  curiosidade: ['Posso te mostrar uma coisa que achei hoje… mas tô até com vergonha 😅'],
-  produto: ['Eu separei umas peças que ficaram lindas… o tecido é incrível, cai super bem no corpo.'],
-  fechamento: ['Se quiser te mostro melhor — posso mandar aqui pra você ver com seus próprios olhos.'],
-};
 
 // ─── Main handler ──────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
-    const { conversationId, content } = await req.json();
+    const body = await req.json();
 
-    if (!conversationId || !content) {
-      return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
+    // history = full in-memory conversation from the frontend (no DB)
+    // userMessage = the new message being sent now
+    const {
+      userMessage,
+      history,
+    }: {
+      userMessage: string;
+      history: HistoryMessage[];
+    } = body;
+
+    if (!userMessage || typeof userMessage !== 'string') {
+      return NextResponse.json({ error: 'Mensagem inválida' }, { status: 400 });
     }
 
-    const sanitized = content.trim().slice(0, 1000).replace(/<[^>]*>/g, '');
+    const sanitized = userMessage.trim().slice(0, 1000).replace(/<[^>]*>/g, '');
     if (!sanitized) {
-      return NextResponse.json({ error: 'Mensagem invalida' }, { status: 400 });
+      return NextResponse.json({ error: 'Mensagem vazia' }, { status: 400 });
     }
 
-    const db = getSupabaseAdmin();
+    const safeHistory: HistoryMessage[] = Array.isArray(history)
+      ? history.filter(
+          (m) =>
+            m &&
+            (m.role === 'user' || m.role === 'assistant') &&
+            typeof m.content === 'string' &&
+            m.content.trim() !== ''
+        )
+      : [];
 
-    // 1. Load conversation
-    const { data: conversation, error: convError } = await db
-      .from('conversations')
-      .select('*')
-      .eq('id', conversationId)
-      .single();
+    // Derive stage and client name from the in-memory history
+    const stage = deriveStage(safeHistory);
+    const clientName = extractClientName(safeHistory);
+    const systemPrompt = buildSystemPrompt(stage, clientName);
 
-    if (convError || !conversation) {
-      return NextResponse.json({ error: 'Conversa nao encontrada' }, { status: 404 });
+    // Build messages array for OpenAI
+    // Keep last 20 messages for context (to avoid token limit issues)
+    const contextMessages = safeHistory.slice(-20);
+
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey || !openaiKey.startsWith('sk-')) {
+      console.error('[Julia] OPENAI_API_KEY not configured');
+      return NextResponse.json(
+        { error: 'OpenAI não configurada. Adicione OPENAI_API_KEY nas variáveis de ambiente.' },
+        { status: 503 }
+      );
     }
 
-    if (
-      conversation.status === 'blocked_free_limit' ||
-      conversation.status === 'blocked_paid_limit'
-    ) {
-      return NextResponse.json({ error: 'LIMIT_REACHED' }, { status: 403 });
+    // Call OpenAI
+    const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + openaiKey,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...contextMessages,
+          { role: 'user', content: sanitized },
+        ],
+        max_tokens: 120,
+        temperature: 0.85,
+        presence_penalty: 0.6,  // discourage repeating topics already covered
+        frequency_penalty: 0.5, // discourage repeating exact phrases
+      }),
+    });
+
+    if (!aiRes.ok) {
+      const errText = await aiRes.text();
+      console.error('[Julia] OpenAI error:', aiRes.status, errText);
+      return NextResponse.json(
+        { error: `OpenAI retornou erro ${aiRes.status}: ${errText}` },
+        { status: 502 }
+      );
     }
 
-    // 2. Save user message
-    const { data: userMessage, error: userMsgError } = await db
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        sender: 'user',
-        content: sanitized,
-        message_type: 'text',
-      })
-      .select()
-      .single();
-
-    if (userMsgError || !userMessage) {
-      console.error('[Julia] Error saving user message:', userMsgError);
-      return NextResponse.json({ error: 'Erro ao salvar mensagem' }, { status: 500 });
-    }
-
-    // 3. Load recent message history (last 30)
-    const { data: recentMessages } = await db
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .neq('message_type', 'system')
-      .order('created_at', { ascending: true })
-      .limit(30);
-
-    const history = recentMessages || [];
-
-    // 4. Derive stage from assistant message count
-    const assistantCount = history.filter((m) => m.sender === 'assistant').length;
-    const currentStage = getStageFromCount(assistantCount);
-
-    // 5. Extract client name from conversation history
-    const clientName = extractClientName(history);
-
-    // 6. Build context messages for OpenAI (exclude system messages, keep last 20)
-    const contextMessages = history
-      .filter((m) => m.content && m.content.trim() !== '')
-      .slice(-20)
-      .map((m) => ({
-        role: m.sender === 'user' ? ('user' as const) : ('assistant' as const),
-        content: m.content as string,
-      }));
-
-    // 7. Build system prompt for this stage
-    const systemPrompt = buildStagePrompt(currentStage, clientName);
-
-    // 8. Check if we're on the last free message
-    const freeUsed = conversation.free_used || 0;
-    const paidRemaining = conversation.paid_remaining || 0;
-    const isLastFree =
-      (conversation.status === 'active' || conversation.status === 'active_free') &&
-      freeUsed >= 14;
-    const isLastPaid =
-      (conversation.status === 'paid' || conversation.status === 'active_paid') &&
-      paidRemaining === 1;
-
-    let finalSystemPrompt = systemPrompt;
-    if (isLastFree || isLastPaid) {
-      finalSystemPrompt +=
-        '\n\nEsta é sua última mensagem deste ciclo. Despeça-se de forma calorosa, diga que volta logo.';
-    }
-
-    // 9. Generate assistant response
-    let assistantContent: string;
-
-    if (isOpenAIConfigured()) {
-      try {
-        const openaiKey = process.env.OPENAI_API_KEY!;
-        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + openaiKey,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [
-              { role: 'system', content: finalSystemPrompt },
-              ...contextMessages,
-            ],
-            max_tokens: 120,
-            temperature: 0.85,
-          }),
-        });
-
-        if (!aiRes.ok) {
-          throw new Error('OpenAI HTTP ' + aiRes.status);
-        }
-
-        const aiJson = (await aiRes.json()) as {
-          choices: Array<{ message: { content: string | null } }>;
-        };
-        assistantContent =
-          aiJson.choices[0]?.message?.content?.trim() ||
-          FALLBACKS[currentStage][0];
-      } catch (aiError) {
-        console.error('[Julia] OpenAI error:', aiError);
-        const fallbacks = FALLBACKS[currentStage];
-        assistantContent = fallbacks[Math.floor(Math.random() * fallbacks.length)];
-      }
-    } else {
-      console.warn('[Julia] OpenAI not configured — using fallback');
-      const fallbacks = FALLBACKS[currentStage];
-      assistantContent = fallbacks[freeUsed % fallbacks.length];
-    }
-
-    // 10. Save assistant response
-    const { data: assistantMessage, error: assistantMsgError } = await db
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        sender: 'assistant',
-        content: assistantContent,
-        message_type: 'text',
-      })
-      .select()
-      .single();
-
-    if (assistantMsgError || !assistantMessage) {
-      console.error('[Julia] Error saving assistant message:', assistantMsgError);
-      return NextResponse.json({ error: 'Erro ao salvar resposta' }, { status: 500 });
-    }
-
-    // 11. Update conversation counters and status
-    let updatedFreeUsed = freeUsed;
-    let updatedPaidRemaining = paidRemaining;
-    let updatedStatus: string = conversation.status;
-
-    if (conversation.status === 'active' || conversation.status === 'active_free') {
-      updatedFreeUsed = freeUsed + 1;
-      if (updatedFreeUsed >= 15) updatedStatus = 'blocked_free_limit';
-    } else if (conversation.status === 'paid' || conversation.status === 'active_paid') {
-      updatedPaidRemaining = Math.max(0, paidRemaining - 1);
-      if (updatedPaidRemaining <= 0) updatedStatus = 'blocked_paid_limit';
-    }
-
-    const { data: updatedConv } = await db
-      .from('conversations')
-      .update({
-        free_used: updatedFreeUsed,
-        paid_remaining: updatedPaidRemaining,
-        status: updatedStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversationId)
-      .select()
-      .single();
-
-    const finalConv = updatedConv || {
-      ...conversation,
-      free_used: updatedFreeUsed,
-      paid_remaining: updatedPaidRemaining,
-      status: updatedStatus,
+    const aiJson = (await aiRes.json()) as {
+      choices: Array<{ message: { content: string | null } }>;
     };
 
-    return NextResponse.json({
-      userMessage,
-      assistantMessage,
-      imageMessage: null,
-      followupMessage: null,
-      conversation: finalConv,
-    });
+    const reply = aiJson.choices?.[0]?.message?.content?.trim();
+
+    if (!reply) {
+      console.error('[Julia] Empty response from OpenAI:', JSON.stringify(aiJson));
+      return NextResponse.json(
+        { error: 'OpenAI retornou resposta vazia.' },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({ reply });
   } catch (err) {
-    console.error('[Julia] General error:', err);
-    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 });
+    console.error('[Julia] Unexpected error:', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Erro interno do servidor' },
+      { status: 500 }
+    );
   }
 }
