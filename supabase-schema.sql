@@ -5,16 +5,14 @@
 -- =============================================
 
 -- 1. Tabela de conversas
+-- NOTA: o banco real tem apenas as colunas abaixo (sem user_id, fingerprint, etc.)
+-- O stage da conversa é derivado do número de mensagens do assistente no histórico.
 create table if not exists conversations (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null,
-  fingerprint text,
   status text not null default 'active'
-    check (status in ('active','paid','blocked_free_limit','blocked_paid_limit')),
+    check (status in ('active','active_free','paid','active_paid','blocked_free_limit','blocked_paid_limit')),
   free_used int not null default 0,
   paid_remaining int not null default 0,
-  total_paid_cycles int not null default 0,
-  current_cycle_images_sent int not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

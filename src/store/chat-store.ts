@@ -5,16 +5,16 @@ interface ChatState {
   // Session
   conversationId: string | null;
   userId: string | null;
-  
+
   // Conversation state
   status: Conversation['status'];
   freeUsed: number;
   paidRemaining: number;
   totalPaidCycles: number;
-  
+
   // Messages
   messages: Message[];
-  
+
   // UI
   isTyping: boolean;
   isLoading: boolean;
@@ -22,7 +22,7 @@ interface ChatState {
   isInitialized: boolean;
   error: string | null;
   showPaymentModal: boolean;
-  
+
   // Actions
   setConversation: (conv: Conversation) => void;
   setMessages: (msgs: Message[]) => void;
@@ -33,7 +33,7 @@ interface ChatState {
   setError: (err: string | null) => void;
   setShowPaymentModal: (val: boolean) => void;
   setInitialized: (val: boolean) => void;
-  
+
   // Async actions
   initSession: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
@@ -76,19 +76,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setShowPaymentModal: (val) => set({ showPaymentModal: val }),
   setInitialized: (val) => set({ isInitialized: val }),
 
-  // Init session
+  // ── Init session ────────────────────────────────────────────────────────
   initSession: async () => {
     const state = get();
+    // Guard: never double-init
     if (state.isLoading || state.isInitialized) return;
 
     set({ isLoading: true, error: null });
 
     try {
-      // Import fingerprint dynamically (client-side only)
-      const { getBrowserFingerprint } = await import('@/lib/fingerprint');
-      const fingerprint = await getBrowserFingerprint();
-
-      // Recuperar conversationId salvo localmente
+      // Retrieve persisted conversationId from localStorage
       const savedConversationId =
         typeof window !== 'undefined'
           ? localStorage.getItem('julia_conversation_id')
@@ -98,7 +95,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fingerprint,
           conversationId: savedConversationId || undefined,
         }),
       });
@@ -109,29 +105,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const data = await res.json();
 
-      // Persistir o conversationId para recuperar na próxima visita
-      if (typeof window !== 'undefined') {
+      // Persist conversationId so reload recovers the same conversation
+      if (typeof window !== 'undefined' && data.conversation?.id) {
         localStorage.setItem('julia_conversation_id', data.conversation.id);
       }
 
       set({
         conversationId: data.conversation.id,
-        userId: data.conversation.user_id,
+        userId: data.conversation.user_id ?? null,
         status: data.conversation.status,
         freeUsed: data.conversation.free_used,
         paidRemaining: data.conversation.paid_remaining,
         totalPaidCycles: data.conversation.total_paid_cycles ?? 0,
         messages: data.messages || [],
         isInitialized: true,
+        error: null,
       });
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Erro desconhecido' });
+      set({
+        error: err instanceof Error ? err.message : 'Erro desconhecido',
+        isInitialized: false,
+      });
     } finally {
       set({ isLoading: false });
     }
   },
 
-  // Send message
+  // ── Send message ────────────────────────────────────────────────────────
   sendMessage: async (content: string) => {
     const state = get();
     if (!state.conversationId || state.isSending) return;
@@ -168,9 +168,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        
+
         if (errData.error === 'LIMIT_REACHED') {
-          // Força o bloqueio no frontend
           set({ status: 'blocked_free_limit' });
           throw new Error('LIMIT_REACHED');
         }
@@ -180,10 +179,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const data = await res.json();
 
-      // Replace temp message with real ones and add assistant response(s)
+      // Replace temp message with confirmed messages from server
       set((s) => {
         const filtered = s.messages.filter((m) => m.id !== tempUserMsg.id);
-        const newMsgs = [data.userMessage, data.assistantMessage];
+        const newMsgs: Message[] = [data.userMessage, data.assistantMessage];
         if (data.imageMessage) newMsgs.push(data.imageMessage);
         if (data.followupMessage) newMsgs.push(data.followupMessage);
         return {
@@ -195,7 +194,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       });
 
-      // Check if blocked after this response
+      // Show payment modal if blocked after this response
       if (
         data.conversation.status === 'blocked_free_limit' ||
         data.conversation.status === 'blocked_paid_limit'
@@ -203,20 +202,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ showPaymentModal: true });
       }
     } catch (err) {
-      const isLimitReached = err instanceof Error && err.message === 'LIMIT_REACHED';
-      
+      const isLimitReached =
+        err instanceof Error && err.message === 'LIMIT_REACHED';
+
       // Remove temp message on error
       set((s) => ({
         messages: s.messages.filter((m) => m.id !== tempUserMsg.id),
-        // Se for LIMIT_REACHED, não joga erro genérico, só o bloqueio visual atua
-        error: isLimitReached ? null : (err instanceof Error ? err.message : 'Erro ao enviar'),
+        error: isLimitReached
+          ? null
+          : err instanceof Error
+          ? err.message
+          : 'Erro ao enviar',
       }));
     } finally {
       set({ isSending: false, isTyping: false });
     }
   },
 
-  // Refresh conversation state
+  // ── Refresh conversation (used for payment polling) ─────────────────────
   refreshConversation: async () => {
     const state = get();
     if (!state.conversationId) return;

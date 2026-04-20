@@ -57,16 +57,36 @@ export function getUpdatedCounters(conversation: Conversation): {
   return { free_used, paid_remaining, status };
 }
 
-export function getConversationPhase(conversation: Conversation): string {
-  const totalPaidCycles = conversation.total_paid_cycles || 0;
-  const paidRemaining = conversation.paid_remaining || 0;
-  const totalAssistantMessages =
-    conversation.free_used + (totalPaidCycles * PAID_LIMIT - paidRemaining);
+export type Stage = 'inicio' | 'nome' | 'conexao' | 'curiosidade' | 'produto' | 'fechamento';
 
+/**
+ * Derive the current conversation stage from the number of assistant
+ * messages already sent (counted from the message history, not free_used).
+ * This is the single source of truth — no extra DB column needed.
+ *
+ *  0 sent → inicio      (Julia greets, asks name)
+ *  1 sent → nome        (Julia received name, asks about the day)
+ *  2-3    → conexao     (Julia builds genuine connection)
+ *  4-6    → curiosidade (Julia sparks curiosity about the product)
+ *  7-12   → produto     (Julia presents the product naturally)
+ *  13+    → fechamento  (Julia drives to action / purchase)
+ */
+export function getStageFromAssistantCount(assistantCount: number): Stage {
+  if (assistantCount === 0) return 'inicio';
+  if (assistantCount === 1) return 'nome';
+  if (assistantCount <= 3) return 'conexao';
+  if (assistantCount <= 6) return 'curiosidade';
+  if (assistantCount <= 12) return 'produto';
+  return 'fechamento';
+}
+
+/** Legacy phase helper kept for backward compat with prompts.ts */
+export function getConversationPhase(conversation: Conversation): string {
   if (conversation.status === 'paid' || conversation.status === 'active_paid') return 'paid';
-  if (totalAssistantMessages <= 3) return 'welcome';   // msgs 1-3: conexão/nome/dia
-  if (totalAssistantMessages <= 7) return 'connection'; // msgs 4-7: quebra de padrão/curiosidade
-  if (totalAssistantMessages <= 15) return 'retention'; // msgs 8-15: apresentação do produto
+  const used = conversation.free_used || 0;
+  if (used <= 3) return 'welcome';
+  if (used <= 7) return 'connection';
+  if (used <= 15) return 'retention';
   return 'paid';
 }
 

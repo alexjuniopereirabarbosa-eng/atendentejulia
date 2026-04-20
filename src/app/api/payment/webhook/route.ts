@@ -59,14 +59,13 @@ export async function POST(req: NextRequest) {
       .eq('conversation_id', conversationId)
       .eq('status', 'pending');
 
-    // Unlock conversation: accumulatively add 30 paid responses and status paid
+    // Unlock conversation: add 30 paid responses and set status to paid
     const { data: conversation } = await supabaseAdmin
       .from('conversations')
-      .select('total_paid_cycles, paid_remaining')
+      .select('paid_remaining')
       .eq('id', conversationId)
       .single();
 
-    const currentCycles = conversation?.total_paid_cycles || 0;
     const currentRemaining = conversation?.paid_remaining || 0;
 
     await supabaseAdmin
@@ -74,8 +73,6 @@ export async function POST(req: NextRequest) {
       .update({
         status: 'paid',
         paid_remaining: currentRemaining + 30,
-        total_paid_cycles: currentCycles + 1,
-        current_cycle_images_sent: 0,
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId);

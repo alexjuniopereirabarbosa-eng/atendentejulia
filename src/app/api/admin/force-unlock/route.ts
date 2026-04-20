@@ -10,21 +10,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Force unlock: set 30 paid messages
-    const { data: conversation } = await supabaseAdmin
-      .from('conversations')
-      .select('total_paid_cycles')
-      .eq('id', conversationId)
-      .single();
-
-    const currentCycles = conversation?.total_paid_cycles || 0;
-
     const { error } = await supabaseAdmin
       .from('conversations')
       .update({
         status: 'paid',
         paid_remaining: 30,
-        total_paid_cycles: currentCycles + 1,
-        current_cycle_images_sent: 0,
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId);
