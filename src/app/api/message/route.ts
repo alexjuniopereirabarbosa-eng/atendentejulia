@@ -1,19 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/server';
-import { openai, isOpenAIConfigured } from '@/lib/openai';
+import { getSupabaseAdmin } from '@/lib/supabase/server';
+import { getOpenAIClient, isOpenAIConfigured } from '@/lib/openai';
 import { buildSystemPrompt } from '@/lib/prompts';
 import type { Conversation } from '@/lib/conversation-logic';
 
 const DEMO_IMAGE_URL =
   process.env.JULIA_DEMO_IMAGE_URL ||
   'https://i.ibb.co/jZ1d1Pcs/quero-mais-cenarios-202604061731.jpg';
-
-const PREVIEW_INVITES = [
-  'quer ver uma previa',
-  'tenho uma previa',
-  'posso te mostrar uma foto',
-  'foto de demonstracao',
-];
 
 const POSITIVE_REPLY_REGEX =
   /^(sim|claro|quero|pode|manda|mostra|quero ver|pode mandar|ok|okay|beleza)$/i;
@@ -29,10 +22,6 @@ const FALLBACK_RESPONSES = [
   'Pode falar, to te ouvindo.',
 ];
 
-function normalizeText(value: string | null | undefined): string {
-  return (value || '').trim().toLowerCase();
-}
-
 function isPositiveReply(text: string): boolean {
   return POSITIVE_REPLY_REGEX.test(text.trim());
 }
@@ -43,8 +32,10 @@ function assistantRecentlyOfferedPreview(
   const lastAssistantText = [...recentMessages]
     .reverse()
     .find((m) => m.sender === 'assistant' && m.content)?.content;
-  const normalized = normalizeText(lastAssistantText);
-  return PREVIEW_INVITES.some((invite) => normalized.includes(invite));
+  const normalized = (lastAssistantText || '').toLowerCase();
+  return ['quer ver uma previa', 'tenho uma previa', 'posso te mostrar'].some(
+    (kw) => normalized.includes(kw)
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -55,16 +46,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
     }
 
-    const sanitizedContent = content
-      .trim()
-      .slice(0, 1000)
-      .replace(/<[^>]*>/g, '');
-
+    const sanitizedContent = content.trim().slice(0, 1000).replace(/<[^>]*>/g, '');
     if (!sanitizedContent) {
       return NextResponse.json({ error: 'Mensagem invalida' }, { status: 400 });
     }
 
-    const { data: conversation, error: convError } = await supabaseAdmin
+    const db = getSupabaseAdmin();
+
+    const { data: conversation, error: convError } = await db
       .from('conversations')
       .select('*')
       .eq('id', conversationId)
@@ -80,7 +69,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'LIMIT_REACHED' }, { status: 403 });
     }
 
-    const { data: userMessage, error: userMsgError } = await supabaseAdmin
+    // Salvar mensagem do usuario
+    const { data: userMessage, error: userMsgError } = await db
       .from('messages')
       .insert({
         conversation_id: conversationId,
@@ -96,7 +86,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Erro ao salvar mensagem' }, { status: 500 });
     }
 
-    const { data: recentMessages } = await supabaseAdmin
+    // Buscar historico recente
+    const { data: recentMessages } = await db
       .from('messages')
       .select('*')
       .eq('conversation_id', conversationId)
@@ -113,14 +104,14 @@ export async function POST(req: NextRequest) {
         content: m.content as string,
       }));
 
-    const { data: promptSetting } = await supabaseAdmin
+    // Buscar prompt customizado
+    const { data: promptSetting } = await db
       .from('admin_settings')
       .select('setting_value')
       .eq('setting_key', 'assistant_prompt')
       .single();
 
     const systemPrompt = buildSystemPrompt(conv, promptSetting?.setting_value || null);
-
     const freeUsed = conv.free_used || 0;
     const paidRemaining = conv.paid_remaining || 0;
 
@@ -133,20 +124,23 @@ export async function POST(req: NextRequest) {
 
     let finalSystemPrompt = systemPrompt;
     if (isLast) {
-      finalSystemPrompt += '\n\nESTA EH SUA ULTIMA MENSAGEM DESTE CICLO. Despeça-se com carinho e de forma profissional.';
+      finalSystemPrompt += '\n\nESTA EH SUA ULTIMA MENSAGEM DESTE CICLO. Despeca-se com carinho.';
     }
 
+    const imagesThisCycle = (conv as unknown as Record<string, number>).current_cycle_images_sent || 0;
     const shouldSendPreviewImage =
       isPositiveReply(sanitizedContent) &&
       assistantRecentlyOfferedPreview(orderedMessages) &&
-      (conv.current_cycle_images_sent || 0) < 2;
+      imagesThisCycle < 2;
 
+    // Gerar resposta
     let assistantContent: string;
 
     if (shouldSendPreviewImage) {
       assistantContent = 'Entao olha essa previa aqui';
     } else if (isOpenAIConfigured()) {
       try {
+        const openai = getOpenAIClient();
         const completion = await openai.chat.completions.create({
           model: 'gpt-4o-mini',
           messages: [
@@ -155,23 +149,24 @@ export async function POST(req: NextRequest) {
           ],
           max_tokens: 150,
           temperature: 0.85,
-          stream: false as const,
+          stream: false,
         });
         assistantContent =
-          completion.choices[0]?.message?.content?.trim() || 'Ola! Pode me contar mais?';
+          (completion as { choices: Array<{ message: { content: string | null } }> })
+            .choices[0]?.message?.content?.trim() || 'Ola! Pode me contar mais?';
       } catch (aiError) {
         console.error('[Julia] OpenAI error:', aiError);
-        assistantContent =
-          FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
+        assistantContent = FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
       }
     } else {
-      console.warn('[Julia] OpenAI nao configurada - usando resposta fallback');
+      console.warn('[Julia] OpenAI nao configurada');
       assistantContent = isLast
         ? 'Vou encerrar por agora. Se quiser, depois continuamos.'
         : FALLBACK_RESPONSES[freeUsed % FALLBACK_RESPONSES.length];
     }
 
-    const { data: assistantMessage, error: assistantMsgError } = await supabaseAdmin
+    // Salvar resposta da assistente
+    const { data: assistantMessage, error: assistantMsgError } = await db
       .from('messages')
       .insert({
         conversation_id: conversationId,
@@ -187,92 +182,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Erro ao salvar resposta' }, { status: 500 });
     }
 
-    let imageMessage = null;
-    let followupMessage = null;
-    let newImageCount = conv.current_cycle_images_sent || 0;
-
-    if (shouldSendPreviewImage) {
-      const { data: insertedImage, error: imageError } = await supabaseAdmin
-        .from('messages')
-        .insert({
-          conversation_id: conversationId,
-          sender: 'assistant',
-          content: null,
-          message_type: 'image',
-          image_url: DEMO_IMAGE_URL,
-        })
-        .select()
-        .single();
-
-      if (!imageError && insertedImage) {
-        imageMessage = insertedImage;
-        newImageCount += 1;
-
-        const { data: insertedFollowup, error: followupError } = await supabaseAdmin
-          .from('messages')
-          .insert({
-            conversation_id: conversationId,
-            sender: 'assistant',
-            content: 'Quero saber o que voce achou dessa previa.',
-            message_type: 'text',
-          })
-          .select()
-          .single();
-
-        if (!followupError) {
-          followupMessage = insertedFollowup;
-        }
-      }
-    }
-
+    // Atualizar contadores
     let updatedFreeUsed = freeUsed;
     let updatedPaidRemaining = paidRemaining;
-    let updatedStatus: Conversation['status'] = conv.status;
+    let updatedStatus: string = conv.status;
 
     if (conv.status === 'active' || conv.status === 'active_free') {
       updatedFreeUsed = freeUsed + 1;
-      if (updatedFreeUsed >= 15) {
-        updatedStatus = 'blocked_free_limit';
-      }
+      if (updatedFreeUsed >= 15) updatedStatus = 'blocked_free_limit';
     } else if (conv.status === 'paid' || conv.status === 'active_paid') {
       updatedPaidRemaining = Math.max(0, paidRemaining - 1);
-      if (updatedPaidRemaining <= 0) {
-        updatedStatus = 'blocked_paid_limit';
-      }
+      if (updatedPaidRemaining <= 0) updatedStatus = 'blocked_paid_limit';
     }
 
-    const { data: updatedConv, error: updateError } = await supabaseAdmin
+    const { data: updatedConv } = await db
       .from('conversations')
       .update({
         free_used: updatedFreeUsed,
         paid_remaining: updatedPaidRemaining,
         status: updatedStatus,
-        current_cycle_images_sent: newImageCount,
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId)
       .select()
       .single();
 
-    if (updateError) {
-      console.error('Error updating conversation:', updateError);
-    }
-
     return NextResponse.json({
       userMessage,
       assistantMessage,
-      imageMessage,
-      followupMessage,
+      imageMessage: null,
+      followupMessage: null,
       conversation: updatedConv || {
         ...conv,
         free_used: updatedFreeUsed,
         paid_remaining: updatedPaidRemaining,
         status: updatedStatus,
-        current_cycle_images_sent: newImageCount,
       },
     });
   } catch (err) {
-    console.error('[Julia] Erro geral na rota /api/message:', err);
+    console.error('[Julia] Erro geral:', err);
     return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 });
   }
 }
